@@ -1,51 +1,100 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { TrendAnalysisStrategy } from '../src/strategies/TrendAnalysisStrategy.js';
-import { HistoricalDataService } from '../src/services/HistoricalDataService.js';
-import { Transaction } from '../src/models.js';
+import { Transaction } from '../models.js';
+import { HistoricalDataService } from '../services/HistoricalDataService.js';
+import { AuditStrategy } from './AuditStrategy.js';
 
-describe('TrendAnalysisStrategy (Feature 3)', () => {
-  let strategy: TrendAnalysisStrategy;
+export class TrendAnalysisStrategy implements AuditStrategy {
+  public readonly name = 'Historical Trend Auditor';
+  public readonly description =
+    'Compares current monthly category spending against historical averages';
 
-  beforeEach(() => {
-    strategy = new TrendAnalysisStrategy();
-    vi.restoreAllMocks();
-  });
+  public async execute(
+    transactions: Transaction[],
+    customParam?: string,
+  ): Promise<string> {
+    const historicalAverages =
+      await HistoricalDataService.getHistoricalAverages();
 
-  // Example of how to write and mock in your tests:
-  //
-  // it('should compute correct spending variances against historical averages', async () => {
-  //   const mockAverages = { Food: 200, Rent: 1000 };
-  //   const spy = vi.spyOn(HistoricalDataService, 'getHistoricalAverages').mockResolvedValue(mockAverages);
-  //
-  //   const testTransactions: Transaction[] = [
-  //     { id: '1', date: '2026-05-01', amount: -250.00, category: 'Food', description: 'Grocery', status: 'completed' }, // +25% change
-  //     { id: '2', date: '2026-05-02', amount: -1000.00, category: 'Rent', description: 'Apartment', status: 'completed' }, // 0% change
-  //   ];
-  //
-  //   const result = await strategy.execute(testTransactions);
-  //
-  //   expect(spy).toHaveBeenCalled();
-  //   expect(result).toContain('+25'); // growth detected
-  //   expect(result).toContain('Food');
-  // });
+    const currentTotals: Record<string, number> = {};
 
-  it.todo(
-    'should group current expenses by category and compute accurate totals',
-  );
+    // Group all expenses by category.
+    for (const transaction of transactions) {
+      if (transaction.amount < 0) {
+        const category = transaction.category;
+        const amount = Math.abs(transaction.amount);
 
-  it.todo(
-    'should calculate variance percentage from historical averages correctly',
-  );
+        currentTotals[category] =
+          (currentTotals[category] ?? 0) + amount;
+      }
+    }
 
-  it.todo(
-    'should highlight categories exceeding positive/negative 20% variance threshold',
-  );
+    const growthCategories: string[] = [];
+    const savingsCategories: string[] = [];
 
-  it.todo(
-    'should handle categories present in current data but missing in historical benchmarks',
-  );
+    let report = 'Historical Trend Audit Report\n\n';
+    report +=
+      'Category | Current Spending | Historical Average | Change\n';
+    report +=
+      '------------------------------------------------------------\n';
 
-  it.todo(
-    'should format historical vs current comparisons in a readable report',
-  );
-});
+    // Include categories from both current data and historical data.
+    const categories = new Set([
+      ...Object.keys(historicalAverages),
+      ...Object.keys(currentTotals),
+    ]);
+
+    for (const category of categories) {
+      const current = currentTotals[category] ?? 0;
+      const historical = historicalAverages[category];
+
+      // Handle a category with no historical benchmark.
+      if (historical === undefined) {
+        report +=
+          `${category} | $${current.toFixed(2)} | N/A | N/A\n`;
+        continue;
+      }
+
+      let variance = 0;
+
+      if (historical !== 0) {
+        variance = ((current - historical) / historical) * 100;
+      }
+
+      const formattedVariance =
+        variance > 0
+          ? `+${variance.toFixed(2)}%`
+          : `${variance.toFixed(2)}%`;
+
+      report +=
+        `${category} | $${current.toFixed(2)} | ` +
+        `$${historical.toFixed(2)} | ${formattedVariance}\n`;
+
+      if (variance > 20) {
+        growthCategories.push(category);
+      } else if (variance < -20) {
+        savingsCategories.push(category);
+      }
+    }
+
+    report += '\nSignificant Growth Categories\n';
+
+    if (growthCategories.length === 0) {
+      report += 'None\n';
+    } else {
+      for (const category of growthCategories) {
+        report += `${category}\n`;
+      }
+    }
+
+    report += '\nSignificant Savings Categories\n';
+
+    if (savingsCategories.length === 0) {
+      report += 'None\n';
+    } else {
+      for (const category of savingsCategories) {
+        report += `${category}\n`;
+      }
+    }
+
+    return report;
+  }
+}
