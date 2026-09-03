@@ -1,100 +1,173 @@
-import { Transaction } from '../models.js';
-import { HistoricalDataService } from '../services/HistoricalDataService.js';
-import { AuditStrategy } from './AuditStrategy.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { TrendAnalysisStrategy } from '../src/strategies/TrendAnalysisStrategy.js';
+import { HistoricalDataService } from '../src/services/HistoricalDataService.js';
+import { Transaction } from '../src/models.js';
 
-export class TrendAnalysisStrategy implements AuditStrategy {
-  public readonly name = 'Historical Trend Auditor';
-  public readonly description =
-    'Compares current monthly category spending against historical averages';
+describe('TrendAnalysisStrategy (Feature 3)', () => {
+  let strategy: TrendAnalysisStrategy;
 
-  public async execute(
-    transactions: Transaction[],
-    customParam?: string,
-  ): Promise<string> {
-    const historicalAverages =
-      await HistoricalDataService.getHistoricalAverages();
+  beforeEach(() => {
+    strategy = new TrendAnalysisStrategy();
+    vi.restoreAllMocks();
+  });
 
-    const currentTotals: Record<string, number> = {};
+  it('should group current expenses by category and compute accurate totals', async () => {
+    vi.spyOn(
+      HistoricalDataService,
+      'getHistoricalAverages',
+    ).mockResolvedValue({
+      Food: 200,
+    });
 
-    // Group all expenses by category.
-    for (const transaction of transactions) {
-      if (transaction.amount < 0) {
-        const category = transaction.category;
-        const amount = Math.abs(transaction.amount);
+    const transactions: Transaction[] = [
+      {
+        id: '1',
+        date: '2026-05-01',
+        amount: -100,
+        category: 'Food',
+        description: 'Groceries',
+        status: 'completed',
+      },
+      {
+        id: '2',
+        date: '2026-05-02',
+        amount: -150,
+        category: 'Food',
+        description: 'Restaurant',
+        status: 'completed',
+      },
+      {
+        id: '3',
+        date: '2026-05-03',
+        amount: 500,
+        category: 'Food',
+        description: 'Refund',
+        status: 'completed',
+      },
+    ];
 
-        currentTotals[category] =
-          (currentTotals[category] ?? 0) + amount;
-      }
-    }
+    const result = await strategy.execute(transactions);
 
-    const growthCategories: string[] = [];
-    const savingsCategories: string[] = [];
+    expect(result).toContain('Food');
+    expect(result).toContain('$250.00');
+  });
 
-    let report = 'Historical Trend Audit Report\n\n';
-    report +=
-      'Category | Current Spending | Historical Average | Change\n';
-    report +=
-      '------------------------------------------------------------\n';
+  it('should calculate variance percentage from historical averages correctly', async () => {
+    vi.spyOn(
+      HistoricalDataService,
+      'getHistoricalAverages',
+    ).mockResolvedValue({
+      Food: 200,
+    });
 
-    // Include categories from both current data and historical data.
-    const categories = new Set([
-      ...Object.keys(historicalAverages),
-      ...Object.keys(currentTotals),
-    ]);
+    const transactions: Transaction[] = [
+      {
+        id: '1',
+        date: '2026-05-01',
+        amount: -250,
+        category: 'Food',
+        description: 'Groceries',
+        status: 'completed',
+      },
+    ];
 
-    for (const category of categories) {
-      const current = currentTotals[category] ?? 0;
-      const historical = historicalAverages[category];
+    const result = await strategy.execute(transactions);
 
-      // Handle a category with no historical benchmark.
-      if (historical === undefined) {
-        report +=
-          `${category} | $${current.toFixed(2)} | N/A | N/A\n`;
-        continue;
-      }
+    expect(result).toContain('+25.00%');
+  });
 
-      let variance = 0;
+  it('should highlight categories exceeding positive/negative 20% variance threshold', async () => {
+    vi.spyOn(
+      HistoricalDataService,
+      'getHistoricalAverages',
+    ).mockResolvedValue({
+      Food: 200,
+      Entertainment: 200,
+    });
 
-      if (historical !== 0) {
-        variance = ((current - historical) / historical) * 100;
-      }
+    const transactions: Transaction[] = [
+      {
+        id: '1',
+        date: '2026-05-01',
+        amount: -250,
+        category: 'Food',
+        description: 'Groceries',
+        status: 'completed',
+      },
+      {
+        id: '2',
+        date: '2026-05-02',
+        amount: -100,
+        category: 'Entertainment',
+        description: 'Movies',
+        status: 'completed',
+      },
+    ];
 
-      const formattedVariance =
-        variance > 0
-          ? `+${variance.toFixed(2)}%`
-          : `${variance.toFixed(2)}%`;
+    const result = await strategy.execute(transactions);
 
-      report +=
-        `${category} | $${current.toFixed(2)} | ` +
-        `$${historical.toFixed(2)} | ${formattedVariance}\n`;
+    expect(result).toContain('+25.00%');
+    expect(result).toContain('-50.00%');
+    expect(result).toContain('Significant Growth Categories');
+    expect(result).toContain('Significant Savings Categories');
+    expect(result).toContain('Food');
+    expect(result).toContain('Entertainment');
+  });
 
-      if (variance > 20) {
-        growthCategories.push(category);
-      } else if (variance < -20) {
-        savingsCategories.push(category);
-      }
-    }
+  it('should handle categories present in current data but missing in historical benchmarks', async () => {
+    vi.spyOn(
+      HistoricalDataService,
+      'getHistoricalAverages',
+    ).mockResolvedValue({
+      Food: 200,
+    });
 
-    report += '\nSignificant Growth Categories\n';
+    const transactions: Transaction[] = [
+      {
+        id: '1',
+        date: '2026-05-01',
+        amount: -300,
+        category: 'Travel',
+        description: 'Hotel',
+        status: 'completed',
+      },
+    ];
 
-    if (growthCategories.length === 0) {
-      report += 'None\n';
-    } else {
-      for (const category of growthCategories) {
-        report += `${category}\n`;
-      }
-    }
+    const result = await strategy.execute(transactions);
 
-    report += '\nSignificant Savings Categories\n';
+    expect(result).toContain('Travel');
+    expect(result).toContain('$300.00');
+    expect(result).toContain('N/A');
+  });
 
-    if (savingsCategories.length === 0) {
-      report += 'None\n';
-    } else {
-      for (const category of savingsCategories) {
-        report += `${category}\n`;
-      }
-    }
+  it('should format historical vs current comparisons in a readable report', async () => {
+    const spy = vi
+      .spyOn(HistoricalDataService, 'getHistoricalAverages')
+      .mockResolvedValue({
+        Food: 200,
+      });
 
-    return report;
-  }
-}
+    const transactions: Transaction[] = [
+      {
+        id: '1',
+        date: '2026-05-01',
+        amount: -200,
+        category: 'Food',
+        description: 'Groceries',
+        status: 'completed',
+      },
+    ];
+
+    const result = await strategy.execute(transactions);
+
+    expect(spy).toHaveBeenCalled();
+    expect(result).toContain('Historical Trend Audit Report');
+    expect(result).toContain('Category');
+    expect(result).toContain('Current Spending');
+    expect(result).toContain('Historical Average');
+    expect(result).toContain('Change');
+    expect(result).toContain('Food');
+    expect(result).toContain('$200.00');
+    expect(result).toContain('0.00%');
+  });
+});
