@@ -11,14 +11,75 @@ export class TrendAnalysisStrategy implements AuditStrategy {
     transactions: Transaction[],
     customParam?: string,
   ): Promise<string> {
-    // TODO: Feature 3 - Implement this strategy.
-    // 1. Call HistoricalDataService.getHistoricalAverages() asynchronously.
-    // 2. Group current expenses (amount < 0) by category and compute category totals.
-    // 3. For each category, compare current total spending against the historical average.
-    // 4. Calculate the rate of change / variance percentage: ((current - historical) / historical) * 100.
-    // 5. Highlight any category with a variance exceeding +/- 20%.
-    // 6. Format and return a text-based audit report detailing comparison metrics.
+    const historicalAverages =
+      await HistoricalDataService.getHistoricalAverages();
 
-    throw new Error('Method not implemented.');
+    const currentTotals: Record<string, number> = {};
+
+    // Group current expenses by category
+    for (const transaction of transactions) {
+      if (transaction.amount < 0) {
+        const category = transaction.category;
+        const amount = Math.abs(transaction.amount);
+
+        if (currentTotals[category] === undefined) {
+          currentTotals[category] = 0;
+        }
+
+        currentTotals[category] += amount;
+      }
+    }
+
+    const growthCategories: string[] = [];
+    const savingsCategories: string[] = [];
+
+    let report = 'Historical Trend Audit Report\n\n';
+    report += 'Category | Current Spending | Historical Average | Change\n';
+    report += '------------------------------------------------------------\n';
+
+    // Compare current spending to historical averages
+    for (const [category, historical] of Object.entries(
+      historicalAverages,
+    )) {
+      const current = currentTotals[category] ?? 0;
+
+      let variance = 0;
+
+      if (historical !== 0) {
+        variance = ((current - historical) / historical) * 100;
+      }
+
+      report += `${category} | $${current.toFixed(2)} | $${historical.toFixed(
+        2,
+      )} | ${variance.toFixed(2)}%\n`;
+
+      if (variance > 20) {
+        growthCategories.push(category);
+      } else if (variance < -20) {
+        savingsCategories.push(category);
+      }
+    }
+
+    report += '\nSignificant Growth Categories\n';
+
+    if (growthCategories.length === 0) {
+      report += 'None\n';
+    } else {
+      for (const category of growthCategories) {
+        report += `${category}\n`;
+      }
+    }
+
+    report += '\nSignificant Savings Categories\n';
+
+    if (savingsCategories.length === 0) {
+      report += 'None\n';
+    } else {
+      for (const category of savingsCategories) {
+        report += `${category}\n`;
+      }
+    }
+
+    return report;
   }
 }
